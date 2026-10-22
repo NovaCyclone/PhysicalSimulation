@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CollideBalls2D · 二维弹性碰撞模拟</title>
+<link rel="stylesheet" href="../documents/simulation2D.css">
+<style>
+  /* 2D 页面补充样式 */
+  .buttons.four {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin: 12px 0 10px;
+  }
+  .buttons.four button {
+    display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+    font-size: 13px; padding: 11px 2px; white-space: nowrap;
+  }
+  /* 速度矢量开关：小圆点表示当前状态，开启时高亮 */
+  #compBtn::before {
+    content: ''; flex: 0 0 auto;
+    width: 7px; height: 7px; border-radius: 50%;
+    background: #5b6785;
+    transition: background .15s, box-shadow .15s;
+  }
+  #compBtn.on {
+    background: #213a5e; border-color: #3d6ea8; color: #d3e5ff;
+  }
+  #compBtn.on::before { background: #4ea8ff; box-shadow: 0 0 8px #4ea8ff; }
+  #compBtn:hover:not(:disabled) { background: #2a3452; }
+  #compBtn.on:hover:not(:disabled) { background: #26466f; }
+  .opt {
+    display: flex; align-items: center; gap: 8px;
+    margin: 10px 0 0; font-size: 12.5px; color: var(--muted);
+    cursor: pointer; user-select: none;
+  }
+  .opt + .opt { margin-top: 7px; }
+  .opt input { width: 15px; height: 15px; accent-color: #4ea8ff; cursor: pointer; }
+  #panel .sub { margin-bottom: 12px; }
+  .hint { margin-bottom: 10px; }
+  @media (max-width: 760px) {
+    #stage { flex: 0 0 52vh; min-height: 300px; }
+    #panel { flex: 1 1 auto; min-height: 0; }
+  }
+</style>
+</head>
+<body>
+
+<div id="stage"><canvas id="sim"></canvas></div>
+
+<aside id="panel">
+  <div class="panel-head">
+    <h1>CollideBalls2D</h1>
+    <a class="back-home" href="../index.html" title="返回物理模拟工具箱首页">← 返回首页</a>
+  </div>
+  <p class="sub">
+    两球各有位置 (x, y) 和速度 (vx, vy)。碰到模拟区边缘时垂直于该边的速度分量反向，相遇时发生完全弹性碰撞，动量与动能守恒。
+  </p>
+  <p class="hint">
+    💡 坐标以模拟区左上角为原点，y 轴向下。运行中滑块实时跟随小球，可直接拖动修改速度/位置；质量需暂停后调整。暂停时也可在画布上拖动小球，空格键可启动或暂停。
+  </p>
+
+  <div class="buttons four">
+    <button id="startBtn" class="primary">启动</button>
+    <button id="pauseBtn" disabled>暂停</button>
+    <button id="resetBtn">重置</button>
+    <button id="compBtn" class="on" aria-pressed="true" title="隐藏速度矢量（合速度与 vx / vy 分量）">速度</button>
+  </div>
+
+  <p id="status" class="status">就绪：调整参数后点击「启动」</p>
+
+  <section class="card">
+    <h2><span class="dot dot-a"></span>球 A</h2>
+    <div class="row"><label for="mA">质量 m</label><output id="omA" for="mA">1.0 kg</output></div>
+    <input id="mA" type="range" min="0.5" max="5" step="0.1" value="1">
+    <div class="row"><label for="vxA">速度 vx</label><output id="ovxA" for="vxA">+2.40 m/s</output></div>
+    <input id="vxA" type="range" min="-4" max="4" step="0.05" value="2.4">
+    <div class="row"><label for="vyA">速度 vy</label><output id="ovyA" for="vyA">-1.20 m/s</output></div>
+    <input id="vyA" type="range" min="-4" max="4" step="0.05" value="-1.2">
+    <div class="row"><label for="xA">位置 x</label><output id="oxA" for="xA">22%</output></div>
+    <input id="xA" type="range" min="0.02" max="0.98" step="0.001" value="0.22">
+    <div class="row"><label for="yA">位置 y</label><output id="oyA" for="yA">66%</output></div>
+    <input id="yA" type="range" min="0.02" max="0.98" step="0.001" value="0.66">
+  </section>
+
+  <section class="card">
+    <h2><span class="dot dot-b"></span>球 B</h2>
+    <div class="row"><label for="mB">质量 m</label><output id="omB" for="mB">2.0 kg</output></div>
+    <input id="mB" type="range" min="0.5" max="5" step="0.1" value="2">
+    <div class="row"><label for="vxB">速度 vx</label><output id="ovxB" for="vxB">-2.00 m/s</output></div>
+    <input id="vxB" type="range" min="-4" max="4" step="0.05" value="-2">
+    <div class="row"><label for="vyB">速度 vy</label><output id="ovyB" for="vyB">+1.00 m/s</output></div>
+    <input id="vyB" type="range" min="-4" max="4" step="0.05" value="1">
+    <div class="row"><label for="xB">位置 x</label><output id="oxB" for="xB">76%</output></div>
+    <input id="xB" type="range" min="0.02" max="0.98" step="0.001" value="0.76">
+    <div class="row"><label for="yB">位置 y</label><output id="oyB" for="yB">30%</output></div>
+    <input id="yB" type="range" min="0.02" max="0.98" step="0.001" value="0.30">
+  </section>
+
+  <label class="opt"><input type="checkbox" id="showComp" checked> 显示速度矢量（合速度与 vx / vy 分量）</label>
+  <label class="opt"><input type="checkbox" id="showTrail" checked> 显示运动轨迹</label>
+
+  <section class="card">
+    <h2>实时数据</h2>
+    <div class="kv"><span>A 位置</span><b id="rpA">—</b></div>
+    <div class="kv"><span>A 速度 (m/s)</span><b id="rvA">—</b></div>
+    <div class="kv"><span>B 位置</span><b id="rpB">—</b></div>
+    <div class="kv"><span>B 速度 (m/s)</span><b id="rvB">—</b></div>
+    <div class="kv"><span>球间碰撞</span><b id="rbc">0</b></div>
+    <div class="kv"><span>边界反弹</span><b id="rwc">0</b></div>
+    <div class="kv"><span>总动量 p</span><b id="rp">—</b></div>
+    <div class="kv"><span>总动能 E</span><b id="re">—</b></div>
+    <p class="hint" style="margin:9px 0 0">注：总动量在球间碰撞中守恒；碰壁时由边界冲量改变，总动能始终守恒。</p>
+  </section>
+</aside>
+
+<script>
+(function () {
+  'use strict';
+
+  const VSCALE = 80;              // 1 m/s 对应 80 px/s
+  const FIXED_DT = 1 / 480;       // 物理子步长
+  const MAX_STEPS = 260;
+  const E_BALL = 1;               // 球间完全弹性
+  const E_WALL = 1;               // 边界完全弹性
+  const TRAIL_LEN = 120;
+
+  const $ = id => document.getElementById(id);
+  const canvas = $('sim');
+  const ctx = canvas.getContext('2d');
+  const stage = $('stage');
+
+  const els = {
+    mA: $('mA'), vxA: $('vxA'), vyA: $('vyA'), xA: $('xA'), yA: $('yA'),
+    mB: $('mB'), vxB: $('vxB'), vyB: $('vyB'), xB: $('xB'), yB: $('yB'),
+    omA: $('omA'), ovxA: $('ovxA'), ovyA: $('ovyA'), oxA: $('oxA'), oyA: $('oyA'),
+    omB: $('omB'), ovxB: $('ovxB'), ovyB: $('ovyB'), oxB: $('oxB'), oyB: $('oyB'),
+    start: $('startBtn'), pause: $('pauseBtn'), reset: $('resetBtn'), compBtn: $('compBtn'),
+    status: $('status'), showComp: $('showComp'), showTrail: $('showTrail'),
+    rpA: $('rpA'), rvA: $('rvA'), rpB: $('rpB'), rvB: $('rvB'),
+    rbc: $('rbc'), rwc: $('rwc'), rp: $('rp'), re: $('re')
+  };
+
+  /* ==================== 状态 ==================== */
+  let W = 0, H = 0, DPR = 1;
+  let lastTime = performance.now();
+  let acc = 0, syncClock = 0;
+  let drag = null;
+
+  const state = {
+    running: false, started: false, balls: [],
+    ballHits: 0, wallHits: 0,
+    flash: 0, wallFlash: 0, contact: null
+  };
+
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  const radiusOf = m => 12 + 13 * Math.cbrt(m);
+  const fmtSigned = (v, d = 2) => {
+    const r = Math.abs(v) < 0.005 ? 0 : v;          // 消除 -0.00
+    return (r > 0 ? '+' : '') + r.toFixed(d);
+  };
+  const pctLabel = v => Math.round(v * 100) + '%';
+  const setStatus = t => { els.status.textContent = t; };
+
+  /* ==================== 面板文字 ==================== */
+  function syncLabels() {
+    els.omA.textContent = (+els.mA.value).toFixed(1) + ' kg';
+    els.omB.textContent = (+els.mB.value).toFixed(1) + ' kg';
+    els.ovxA.textContent = fmtSigned(+els.vxA.value) + ' m/s';
+    els.ovyA.textContent = fmtSigned(+els.vyA.value) + ' m/s';
+    els.ovxB.textContent = fmtSigned(+els.vxB.value) + ' m/s';
+    els.ovyB.textContent = fmtSigned(+els.vyB.value) + ' m/s';
+    els.oxA.textContent = pctLabel(+els.xA.value);
+    els.oyA.textContent = pctLabel(+els.yA.value);
+    els.oxB.textContent = pctLabel(+els.xB.value);
+    els.oyB.textContent = pctLabel(+els.yB.value);
+  }
+
+  function lockMass(locked) {
+    els.mA.disabled = locked;
+    els.mB.disabled = locked;
+  }
+
+  function updateButtons() {
+    els.start.disabled = state.running;
+    els.pause.disabled = !state.running;
+    els.start.textContent = state.started ? '继续' : '启动';
+  }
+
+  /* 速度矢量显示开关：按钮与面板里的勾选框保持同步 */
+  function syncCompButton() {
+    const on = els.showComp.checked;
+    els.compBtn.classList.toggle('on', on);
+    els.compBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    els.compBtn.title = on
+      ? '隐藏速度矢量（合速度与 vx / vy 分量）'
+      : '显示速度矢量（合速度与 vx / vy 分量）';
+  }
+
+  function setShowComp(on) {
+    els.showComp.checked = on;
+    syncCompButton();
+    render();
+  }
+
+  /* ==================== 滑块 ↔ 实时状态 ==================== */
+  const editing = new WeakMap();
+  const markEditing = el => editing.set(el, true);
+  const endEditing = el => editing.delete(el);
+  const isEditing = el => editing.get(el) === true;
+
+  function setSlider(el, v) {
+    const val = clamp(Math.round(v * 1000) / 1000, +el.min, +el.max);
+    if (Math.abs(+el.value - val) > 1e-4) el.value = val;
+  }
+
+  /* 把当前速度/位置写回滑块；force 时忽略“正在拖动”保护 */
+  function syncLiveControls(force) {
+    if (!state.balls.length || !W || !H) return;
+    const a = state.balls[0], b = state.balls[1];
+    const pairs = [
+      [els.vxA, a.vx / VSCALE], [els.vyA, a.vy / VSCALE],
+      [els.xA, a.x / W], [els.yA, a.y / H],
+      [els.vxB, b.vx / VSCALE], [els.vyB, b.vy / VSCALE],
+      [els.xB, b.x / W], [els.yB, b.y / H]
+    ];
+    for (const [el, v] of pairs) {
+      if (force || !isEditing(el)) setSlider(el, v);
+    }
+    syncLabels();
+  }
+
+  /* ==================== 建立小球 ==================== */
+  function clampInside(b) {
+    b.x = clamp(b.x, b.r, Math.max(b.r, W - b.r));
+    b.y = clamp(b.y, b.r, Math.max(b.r, H - b.r));
+  }
+
+  function makeBall(label, m, vx, vy, fx, fy, color, light) {
+    const r = radiusOf(m);
+    return {
+      label, m, r, vx, vy, color, light,
+      x: clamp(fx * W, r, Math.max(r, W - r)),
+      y: clamp(fy * H, r, Math.max(r, H - r)),
+      trail: []
+    };
+  }
+
+  /* 位置修正：按质量反比沿两球连线推开，保证不重叠 */
+  function separateOverlap(a, b) {
+    if (!a || !b) return;
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const sum = a.r + b.r;
+    const d2 = dx * dx + dy * dy;
+    if (d2 >= sum * sum) return;
+
+    let d = Math.sqrt(d2), nx, ny;
+    if (d < 1e-6) { nx = 1; ny = 0; d = 0; }
+    else { nx = dx / d; ny = dy / d; }
+
+    const imA = 1 / a.m, imB = 1 / b.m, im = imA + imB;
+    const push = sum - d;
+    a.x -= nx * push * (imA / im); a.y -= ny * push * (imA / im);
+    b.x += nx * push * (imB / im); b.y += ny * push * (imB / im);
+    clampInside(a); clampInside(b);
+  }
+
+  function rebuildFromSliders() {
+    if (W < 80 || H < 80) { state.balls = []; return; }
+    const a = makeBall(
+      'A', +els.mA.value,
+      +els.vxA.value * VSCALE, +els.vyA.value * VSCALE,
+      +els.xA.value, +els.yA.value, '#4ea8ff', '#b9dcff'
+    );
+    const b = makeBall(
+      'B', +els.mB.value,
+      +els.vxB.value * VSCALE, +els.vyB.value * VSCALE,
+      +els.xB.value, +els.yB.value, '#ff7a59', '#ffc8b6'
+    );
+    state.balls = [a, b];
+    separateOverlap(a, b);
+  }
+
+  /* ==================== 物理 ==================== */
+  function collideBalls(a, b) {
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const sum = a.r + b.r;
+    const d2 = dx * dx + dy * dy;
+    if (d2 >= sum * sum) return;
+
+    let d = Math.sqrt(d2), nx, ny;
+    if (d < 1e-6) {
+      /* 球心重合：沿相对速度反方向取法线 */
+      const rvx = a.vx - b.vx, rvy = a.vy - b.vy;
+      const rv = Math.hypot(rvx, rvy);
+      if (rv > 1e-6) { nx = -rvx / rv; ny = -rvy / rv; }
+      else { nx = 1; ny = 0; }
+      d = 0;
+    } else {
+      nx = dx / d; ny = dy / d;
+    }
+
+    const imA = 1 / a.m, imB = 1 / b.m, im = imA + imB;
+    if (im <= 0) return;
+
+    /* 位置修正 */
+    const overlap = sum - d;
+    a.x -= nx * overlap * (imA / im); a.y -= ny * overlap * (imA / im);
+    b.x += nx * overlap * (imB / im); b.y += ny * overlap * (imB / im);
+
+    /* 法向相对速度：< 0 表示正在靠近 */
+    const vn = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
+    if (vn >= 0) return;
+
+    /* 完全弹性冲量：只改变法向分量，切向分量不变 */
+    const j = -(1 + E_BALL) * vn / im;
+    a.vx -= j * imA * nx; a.vy -= j * imA * ny;
+    b.vx += j * imB * nx; b.vy += j * imB * ny;
+
+    state.ballHits++;
+    state.flash = 1;
+    state.contact = { x: a.x + nx * a.r, y: a.y + ny * a.r };
+  }
+
+  /* 边界反弹：只反转垂直于该边的速度分量 */
+  function collideWalls(ball) {
+    let hit = false;
+    const maxX = W - ball.r, maxY = H - ball.r;
+
+    if (ball.x < ball.r) {
+      ball.x = ball.r;
+      if (ball.vx < 0) { ball.vx = -ball.vx * E_WALL; hit = true; }
+    } else if (ball.x > maxX) {
+      ball.x = maxX;
+      if (ball.vx > 0) { ball.vx = -ball.vx * E_WALL; hit = true; }
+    }
+
+    if (ball.y < ball.r) {
+      ball.y = ball.r;
+      if (ball.vy < 0) { ball.vy = -ball.vy * E_WALL; hit = true; }
+    } else if (ball.y > maxY) {
+      ball.y = maxY;
+      if (ball.vy > 0) { ball.vy = -ball.vy * E_WALL; hit = true; }
+    }
+
+    if (hit) { state.wallHits++; state.wallFlash = 1; }
+  }
+
+  function physics(dt) {
+    const a = state.balls[0], b = state.balls[1];
+    if (!a || !b) return;
+
+    a.x += a.vx * dt; a.y += a.vy * dt;
+    b.x += b.vx * dt; b.y += b.vy * dt;
+
+    collideBalls(a, b);
+    collideWalls(a);
+    collideWalls(b);
+  }
+
+  /* ==================== 渲染 ==================== */
+  function drawGrid() {
+    const gap = 64;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(120,150,220,.06)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = gap; x < W; x += gap) {
+      ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, H);
+    }
+    for (let y = gap; y < H; y += gap) {
+      ctx.moveTo(0, y + 0.5); ctx.lineTo(W, y + 0.5);
+    }
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(120,150,220,.10)';
+    ctx.setLineDash([6, 12]);
+    ctx.beginPath();
+    ctx.moveTo(W / 2, 0); ctx.lineTo(W / 2, H);
+    ctx.moveTo(0, H / 2); ctx.lineTo(W, H / 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawTrails() {
+    if (!els.showTrail.checked) return;
+    ctx.save();
+    ctx.lineCap = 'round';
+    for (const b of state.balls) {
+      const tr = b.trail;
+      if (tr.length < 2) continue;
+      for (let i = 1; i < tr.length; i++) {
+        const t = i / tr.length;
+        ctx.globalAlpha = t * t * 0.42;
+        ctx.strokeStyle = b.color;
+        ctx.lineWidth = 0.6 + t * 2.6;
+        ctx.beginPath();
+        ctx.moveTo(tr[i - 1].x, tr[i - 1].y);
+        ctx.lineTo(tr[i].x, tr[i].y);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  function arrow(x0, y0, x1, y1, color, width, glow, dash, alpha, headMax = 12) {
+    const dx = x1 - x0, dy = y1 - y0;
+    const len = Math.hypot(dx, dy);
+    if (len < 4) return;
+
+    const ux = dx / len, uy = dy / len;
+    const head = Math.min(headMax, len * 0.45);
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = width;
+    ctx.lineCap = 'round';
+    if (dash) ctx.setLineDash(dash);
+    if (glow) { ctx.shadowColor = color; ctx.shadowBlur = 12; }
+
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1 - ux * head, y1 - uy * head);
+    ctx.stroke();
+
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x1 - ux * head - uy * head * 0.5, y1 - uy * head + ux * head * 0.5);
+    ctx.lineTo(x1 - ux * head + uy * head * 0.5, y1 - uy * head - ux * head * 0.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  /* 速度箭头：浅色细箭头 = x / y 分量，粗箭头 = 合速度；关闭时两者一起隐藏 */
+  function drawVelocity(b) {
+    if (!els.showComp.checked) return;
+    const sp = Math.hypot(b.vx, b.vy);
+    if (sp < 2) return;
+
+    const pxPer = Math.min(170, 24 + sp * 0.32) / sp;   // 速度向量像素比例
+    const tx = b.x + b.vx * pxPer;
+    const ty = b.y + b.vy * pxPer;
+
+    /* 用虚线补出矢量合成的平行四边形 */
+    ctx.save();
+    ctx.strokeStyle = b.light;
+    ctx.globalAlpha = 0.26;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 6]);
+    ctx.beginPath();
+    ctx.moveTo(tx, b.y);
+    ctx.lineTo(tx, ty);
+    ctx.moveTo(b.x, ty);
+    ctx.lineTo(tx, ty);
+    ctx.stroke();
+    ctx.restore();
+
+    if (Math.abs(b.vx) * pxPer >= 10) {
+      arrow(b.x, b.y, tx, b.y, b.light, 2, false, null, 0.85, 9);
+    }
+    if (Math.abs(b.vy) * pxPer >= 10) {
+      arrow(b.x, b.y, b.x, ty, b.light, 2, false, null, 0.85, 9);
+    }
+
+    arrow(b.x, b.y, tx, ty, b.color, 2.6, true, null, 0.95, 12);
+  }
+
+  /* 在分量箭头末端标注 vx / vy 的数值 */
+  function paintLabel(text, x, y, color) {
+    ctx.lineWidth = 3.5;
+    ctx.strokeStyle = 'rgba(4,8,16,.9)';
+    ctx.strokeText(text, x, y);
+    ctx.fillStyle = color;
+    ctx.fillText(text, x, y);
+  }
+
+  function drawVelocityLabels(b) {
+    if (!els.showComp.checked) return;
+    /* 小屏或球太贴近边缘时不画浮动数值，避免压住小球；分量箭头仍然绘制 */
+    if (W < 520 || H < 320) return;
+    const sp = Math.hypot(b.vx, b.vy);
+    if (sp < 2) return;
+
+    const pxPer = Math.min(170, 24 + sp * 0.32) / sp;
+    const vx = b.vx / VSCALE, vy = b.vy / VSCALE;
+
+    ctx.save();
+    ctx.font = '600 11.5px system-ui, -apple-system, "Segoe UI", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+
+    /* 只有分量箭头明显伸出球体且端点完整落在画布内时才标注 */
+    if (Math.abs(b.vx) * pxPer > b.r + 6) {
+      const text = 'vx ' + fmtSigned(vx);
+      const tw = ctx.measureText(text).width;
+      const tipX = b.x + b.vx * pxPer;
+      const lx = b.vx > 0 ? tipX + 8 : tipX - 8 - tw;
+      const above = b.y - 14;
+      const below = b.y + 18;
+      const ly = above >= 12 ? above : (below <= H - 12 ? below : null);
+      if (ly !== null && lx >= 8 && lx + tw <= W - 8 &&
+          tipX >= 8 && tipX <= W - 8) {
+        paintLabel(text, lx, ly, b.light);
+      }
+    }
+
+    if (Math.abs(b.vy) * pxPer > b.r + 6) {
+      const text = 'vy ' + fmtSigned(vy);
+      const tw = ctx.measureText(text).width;
+      const tipY = b.y + b.vy * pxPer;
+      let lx = b.x + 12;
+      if (lx + tw > W - 8) lx = b.x - 12 - tw;
+      const ly = tipY + (b.vy >= 0 ? 11 : -11);
+      if (lx >= 8 && lx + tw <= W - 8 &&
+          tipY >= 8 && tipY <= H - 8 &&
+          ly >= 12 && ly <= H - 12) {
+        paintLabel(text, lx, ly, b.light);
+      }
+    }
+
+    ctx.restore();
+  }
+
+  function drawBall(b) {
+    const { x, y, r } = b;
+
+    ctx.save();
+    ctx.globalAlpha = 0.28;
+    ctx.fillStyle = '#04060f';
+    ctx.beginPath();
+    ctx.ellipse(x, y + r * 0.95, r * 0.86, r * 0.22, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    const g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.4, r * 0.08, x, y, r * 1.05);
+    g.addColorStop(0, b.light);
+    g.addColorStop(0.5, b.color);
+    g.addColorStop(1, b.color);
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,.35)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(255,255,255,.95)';
+    ctx.font = '700 ' + Math.max(12, r * 0.55) + 'px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(b.label, x, y);
+  }
+
+  function drawFlash() {
+    if (state.flash <= 0.01 || !state.contact) return;
+    const t = 1 - state.flash;
+    ctx.save();
+    ctx.globalAlpha = state.flash * 0.85;
+    ctx.strokeStyle = '#ffe08a';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(state.contact.x, state.contact.y, 8 + t * 46, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawBorder() {
+    const alpha = 0.34 + state.wallFlash * 0.4;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(120,170,255,' + alpha.toFixed(3) + ')';
+    ctx.lineWidth = 2;
+    ctx.shadowColor = 'rgba(80,140,255,.6)';
+    ctx.shadowBlur = 10 + state.wallFlash * 18;
+    ctx.strokeRect(1, 1, W - 2, H - 2);
+    ctx.restore();
+  }
+
+  function drawHud() {
+    ctx.save();
+    ctx.fillStyle = 'rgba(160,180,225,.6)';
+    ctx.font = '600 12px system-ui, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('球间碰撞 ' + state.ballHits + ' · 边界反弹 ' + state.wallHits, 18, H - 16);
+    ctx.restore();
+  }
+
+  function render() {
+    if (!W || !H) return;
+    ctx.clearRect(0, 0, W, H);
+    drawGrid();
+    if (!state.balls.length) return;
+    drawTrails();
+    for (const b of state.balls) drawVelocity(b);
+    for (const b of state.balls) drawBall(b);
+    for (const b of state.balls) drawVelocityLabels(b);
+    drawFlash();
+    drawBorder();
+    drawHud();
+  }
+
+  /* ==================== 实时数据 ==================== */
+  function updateReadout() {
+    if (!state.balls.length || !W || !H) {
+      els.rpA.textContent = '—'; els.rvA.textContent = '—';
+      els.rpB.textContent = '—'; els.rvB.textContent = '—';
+      els.rbc.textContent = '0'; els.rwc.textContent = '0';
+      els.rp.textContent = '—'; els.re.textContent = '—';
+      return;
+    }
+
+    const a = state.balls[0], b = state.balls[1];
+    const avx = a.vx / VSCALE, avy = a.vy / VSCALE;
+    const bvx = b.vx / VSCALE, bvy = b.vy / VSCALE;
+
+    els.rpA.textContent = 'x ' + Math.round(clamp(a.x / W * 100, 0, 100)) +
+                          '% · y ' + Math.round(clamp(a.y / H * 100, 0, 100)) + '%';
+    els.rvA.textContent = 'vx ' + fmtSigned(avx) + ' · vy ' + fmtSigned(avy);
+    els.rpB.textContent = 'x ' + Math.round(clamp(b.x / W * 100, 0, 100)) +
+                          '% · y ' + Math.round(clamp(b.y / H * 100, 0, 100)) + '%';
+    els.rvB.textContent = 'vx ' + fmtSigned(bvx) + ' · vy ' + fmtSigned(bvy);
+    els.rbc.textContent = String(state.ballHits);
+    els.rwc.textContent = String(state.wallHits);
+
+    const px = a.m * avx + b.m * bvx;
+    const py = a.m * avy + b.m * bvy;
+    const energy = 0.5 * a.m * (avx * avx + avy * avy) +
+                   0.5 * b.m * (bvx * bvx + bvy * bvy);
+
+    els.rp.textContent = '(' + fmtSigned(px) + ', ' + fmtSigned(py) + ') kg·m/s';
+    els.re.textContent = energy.toFixed(2) + ' J';
+  }
+
+  /* ==================== 滑块输入 ==================== */
+  const SLIDER_MAP = {
+    vxA: [0, 'vx', true], vyA: [0, 'vy', true], xA: [0, 'x', false], yA: [0, 'y', false],
+    vxB: [1, 'vx', true], vyB: [1, 'vy', true], xB: [1, 'x', false], yB: [1, 'y', false]
+  };
+
+  function applySlider(el) {
+    if (!state.balls.length) return;
+    const id = el.id;
+
+    if (id === 'mA' || id === 'mB') {
+      const i = id === 'mA' ? 0 : 1;
+      const ball = state.balls[i];
+      ball.m = +el.value;
+      ball.r = radiusOf(ball.m);
+      clampInside(ball);
+      separateOverlap(state.balls[0], state.balls[1]);
+      return;
+    }
+
+    const cfg = SLIDER_MAP[id];
+    if (!cfg) return;
+    const [i, prop, isVel] = cfg;
+    const ball = state.balls[i];
+
+    if (isVel) {
+      ball[prop] = (+el.value) * VSCALE;
+    } else {
+      const lim = prop === 'x' ? W : H;
+      ball[prop] = clamp((+el.value) * lim, ball.r, Math.max(ball.r, lim - ball.r));
+    }
+  }
+
+  function onParamChange(e) {
+    syncLabels();
+    applySlider(e.target);
+    updateReadout();
+    render();
+  }
+
+  ['mA', 'vxA', 'vyA', 'xA', 'yA', 'mB', 'vxB', 'vyB', 'xB', 'yB'].forEach(id => {
+    const el = els[id];
+    el.addEventListener('input', onParamChange);
+    el.addEventListener('pointerdown', () => markEditing(el));
+    el.addEventListener('keydown', () => markEditing(el));
+    el.addEventListener('keyup', () => endEditing(el));
+    el.addEventListener('change', () => endEditing(el));
+    el.addEventListener('blur', () => endEditing(el));
+  });
+
+  ['pointerup', 'pointercancel'].forEach(evt => {
+    document.addEventListener(evt, () => {
+      ['vxA', 'vyA', 'xA', 'yA', 'vxB', 'vyB', 'xB', 'yB'].forEach(id => endEditing(els[id]));
+    });
+  });
+
+  /* ==================== 画布拖动 ==================== */
+  function pointerPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+
+  function hitBall(p) {
+    for (let i = state.balls.length - 1; i >= 0; i--) {
+      const b = state.balls[i];
+      if (Math.hypot(p.x - b.x, p.y - b.y) <= b.r + 6) return i;
+    }
+    return -1;
+  }
+
+  canvas.addEventListener('pointerdown', e => {
+    if (state.running || !state.balls.length) return;
+    const p = pointerPos(e);
+    const idx = hitBall(p);
+    if (idx < 0) return;
+
+    drag = { idx, ox: p.x - state.balls[idx].x, oy: p.y - state.balls[idx].y };
+    canvas.setPointerCapture(e.pointerId);
+    canvas.style.cursor = 'grabbing';
+    e.preventDefault();
+  });
+
+  canvas.addEventListener('pointermove', e => {
+    if (state.running) { canvas.style.cursor = 'default'; return; }
+    const p = pointerPos(e);
+
+    if (!drag) {
+      canvas.style.cursor = hitBall(p) >= 0 ? 'grab' : 'default';
+      return;
+    }
+
+    const b = state.balls[drag.idx];
+    b.x = clamp(p.x - drag.ox, b.r, Math.max(b.r, W - b.r));
+    b.y = clamp(p.y - drag.oy, b.r, Math.max(b.r, H - b.r));
+    b.trail.length = 0;
+
+    if (drag.idx === 0) { setSlider(els.xA, b.x / W); setSlider(els.yA, b.y / H); }
+    else { setSlider(els.xB, b.x / W); setSlider(els.yB, b.y / H); }
+
+    syncLabels();
+    updateReadout();
+    render();
+  });
+
+  function endDrag(e) {
+    if (!drag) return;
+    drag = null;
+
+    separateOverlap(state.balls[0], state.balls[1]);
+    syncLiveControls(true);
+    updateReadout();
+    canvas.style.cursor = 'default';
+
+    if (e && e.pointerId !== undefined &&
+        canvas.hasPointerCapture && canvas.hasPointerCapture(e.pointerId)) {
+      canvas.releasePointerCapture(e.pointerId);
+    }
+
+    setStatus(state.started
+      ? '已暂停 · 位置已调整，点击「启动」继续'
+      : '就绪：点击「启动」开始模拟');
+    render();
+  }
+
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
+
+  /* ==================== 按钮 ==================== */
+  const DEFAULTS = {
+    mA: 1, vxA: 2.4, vyA: -1.2, xA: 0.22, yA: 0.66,
+    mB: 2, vxB: -2.0, vyB: 1.0, xB: 0.76, yB: 0.30
+  };
+
+  function startSim() {
+    if (state.running) return;
+
+    if (!state.started) {
+      rebuildFromSliders();
+      state.ballHits = 0;
+      state.wallHits = 0;
+      state.flash = 0;
+      state.wallFlash = 0;
+      state.contact = null;
+      state.balls.forEach(b => { b.trail.length = 0; });
+      state.started = true;
+    } else {
+      separateOverlap(state.balls[0], state.balls[1]);
+    }
+
+    state.running = true;
+    acc = 0;
+    syncClock = 0;
+    lastTime = performance.now();
+    lockMass(true);
+    updateButtons();
+    syncLabels();
+    setStatus('运行中 · 滑块实时跟随小球，可直接拖动修改速度/位置；质量已锁定，暂停后可调');
+    render();
+  }
+
+  function pauseSim() {
+    if (!state.running) return;
+    state.running = false;
+    acc = 0;
+    syncLiveControls(true);
+    lockMass(false);
+    updateButtons();
+    updateReadout();
+    setStatus('已暂停 · 滑块已同步为当前状态，可调整参数或在画布上拖动小球，再次「启动」继续');
+    render();
+  }
+
+  function resetSim() {
+    state.running = false;
+    state.started = false;
+    acc = 0;
+    syncClock = 0;
+    state.ballHits = 0;
+    state.wallHits = 0;
+    state.flash = 0;
+    state.wallFlash = 0;
+    state.contact = null;
+
+    for (const k in DEFAULTS) els[k].value = DEFAULTS[k];
+
+    lockMass(false);
+    rebuildFromSliders();
+    updateButtons();
+    syncLabels();
+    updateReadout();
+    setStatus('已重置为默认参数 · 点击「启动」开始模拟');
+    render();
+  }
+
+  els.start.addEventListener('click', startSim);
+  els.pause.addEventListener('click', pauseSim);
+  els.reset.addEventListener('click', resetSim);
+  els.compBtn.addEventListener('click', () => setShowComp(!els.showComp.checked));
+
+  window.addEventListener('keydown', e => {
+    if (e.code !== 'Space') return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'BUTTON' || t.tagName === 'TEXTAREA')) return;
+    e.preventDefault();
+    if (state.running) pauseSim(); else startSim();
+  });
+
+  els.showTrail.addEventListener('change', () => {
+    if (!els.showTrail.checked) state.balls.forEach(b => { b.trail.length = 0; });
+    render();
+  });
+  els.showComp.addEventListener('change', () => setShowComp(els.showComp.checked));
+
+  /* ==================== 主循环 ==================== */
+  function frame(now) {
+    let dt = (now - lastTime) / 1000;
+    lastTime = now;
+    if (dt > 0.05) dt = 0.05;
+
+    if (state.running) {
+      acc += dt;
+      let steps = 0;
+      while (acc >= FIXED_DT && steps < MAX_STEPS) {
+        physics(FIXED_DT);
+        acc -= FIXED_DT;
+        steps++;
+      }
+      if (acc > FIXED_DT * 4) acc = 0;
+
+      if (els.showTrail.checked) {
+        for (const b of state.balls) {
+          b.trail.push({ x: b.x, y: b.y });
+          if (b.trail.length > TRAIL_LEN) b.trail.shift();
+        }
+      }
+
+      updateReadout();
+
+      syncClock += dt;
+      if (syncClock >= 1 / 25) {
+        syncClock = 0;
+        syncLiveControls(false);
+      }
+    }
+
+    if (state.flash > 0) state.flash = Math.max(0, state.flash - dt * 3);
+    if (state.wallFlash > 0) state.wallFlash = Math.max(0, state.wallFlash - dt * 4);
+
+    render();
+    requestAnimationFrame(frame);
+  }
+
+  /* ==================== 尺寸自适应 ==================== */
+  function resize() {
+    const rect = stage.getBoundingClientRect();
+    const newW = Math.max(1, Math.round(rect.width));
+    const newH = Math.max(1, Math.round(rect.height));
+    DPR = window.devicePixelRatio || 1;
+
+    canvas.width = Math.round(newW * DPR);
+    canvas.height = Math.round(newH * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+    const oldW = W, oldH = H;
+    W = newW;
+    H = newH;
+
+    if (state.balls.length && oldW > 1 && oldH > 1) {
+      const kx = W / oldW, ky = H / oldH;
+      for (const b of state.balls) {
+        b.x = clamp(b.x * kx, b.r, Math.max(b.r, W - b.r));
+        b.y = clamp(b.y * ky, b.r, Math.max(b.r, H - b.r));
+        b.trail.length = 0;
+      }
+      separateOverlap(state.balls[0], state.balls[1]);
+    } else {
+      rebuildFromSliders();
+    }
+
+    render();
+  }
+
+  /* ==================== 启动 ==================== */
+  syncLabels();
+  updateButtons();
+  syncCompButton();
+  resize();
+  updateReadout();
+
+  if (window.ResizeObserver) new ResizeObserver(resize).observe(stage);
+  else window.addEventListener('resize', resize);
+
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
