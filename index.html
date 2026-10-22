@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PhysicalSimulation · 物理模拟工具箱</title>
+
+<style>
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+:root {
+    --bg: #f5f7fb;
+    --card: #ffffff;
+    --text: #202b3c;
+    --sub: #788397;
+    --primary: #5278d9;
+    --border: #e8edf5;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont,
+    "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+}
+
+/* 顶部导航 */
+
+header {
+    height: 68px;
+    background: white;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 8%;
+}
+
+.logo {
+    font-size: 21px;
+    font-weight: 700;
+    color: var(--primary);
+    letter-spacing: 1px;
+}
+
+nav a {
+    text-decoration: none;
+    color: #667085;
+    margin-left: 28px;
+    font-size: 14px;
+}
+
+nav a:hover {
+    color: var(--primary);
+}
+
+/* 主体 */
+
+.container {
+    max-width: 1120px;
+    margin: auto;
+    padding: 45px 25px;
+}
+
+/* 欢迎区域 */
+
+.hero {
+    background: linear-gradient(120deg, #4268c9, #7598e8);
+    color: white;
+    padding: 48px 45px;
+    border-radius: 16px;
+    margin-bottom: 35px;
+}
+
+.hero h1 {
+    font-size: 32px;
+    margin-bottom: 13px;
+}
+
+.hero p {
+    font-size: 15px;
+    opacity: .85;
+    line-height: 1.8;
+}
+
+.hero .credit {
+    margin-top: 7px;
+    font-size: 12px;
+    opacity: .7;
+}
+
+/* 搜索框 */
+
+.search-box {
+    margin-top: 27px;
+    max-width: 550px;
+}
+
+.search-box input {
+    width: 100%;
+    padding: 15px 20px;
+    border: none;
+    border-radius: 9px;
+    outline: none;
+    font-size: 15px;
+    background: white;
+}
+
+/* 分类导航 */
+
+.categories {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 30px;
+}
+
+.category {
+    border: 1px solid var(--border);
+    background: white;
+    padding: 9px 19px;
+    border-radius: 20px;
+    cursor: pointer;
+    color: #667085;
+    font-size: 14px;
+    transition: .2s;
+}
+
+.category:hover,
+.category.active {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+}
+
+/* 标题 */
+
+.section-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 19px;
+}
+
+.section-title h2 {
+    font-size: 21px;
+}
+
+.section-title span {
+    color: var(--sub);
+    font-size: 13px;
+}
+
+/* 工具卡片 */
+
+.tools-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 18px;
+}
+
+.tool-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 23px;
+    transition: .2s;
+    display: flex;
+    flex-direction: column;
+    min-height: 175px;
+}
+
+.tool-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 25px rgba(40,60,100,.08);
+    border-color: #b9c9ef;
+}
+
+.tool-icon {
+    font-size: 27px;
+    margin-bottom: 15px;
+}
+
+.tool-card h3 {
+    font-size: 17px;
+    margin-bottom: 9px;
+}
+
+.tool-card p {
+    font-size: 13px;
+    color: var(--sub);
+    line-height: 1.7;
+    flex: 1;
+}
+
+.tool-card a {
+    display: inline-block;
+    margin-top: 17px;
+    color: var(--primary);
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.tool-card a:hover {
+    text-decoration: underline;
+}
+
+.empty {
+    text-align: center;
+    padding: 50px;
+    color: var(--sub);
+    display: none;
+}
+
+/* 页脚 */
+
+footer {
+    text-align: center;
+    padding: 35px 15px;
+    color: #98a2b3;
+    font-size: 13px;
+    margin-top: 50px;
+    border-top: 1px solid var(--border);
+}
+
+footer a {
+    color: #98a2b3;
+}
+
+footer a:hover {
+    color: var(--primary);
+}
+
+/* 手机适配 */
+
+@media (max-width: 750px) {
+    header {
+        padding: 0 5%;
+    }
+
+    .container {
+        padding: 25px 17px;
+    }
+
+    .hero {
+        padding: 35px 25px;
+    }
+
+    .hero h1 {
+        font-size: 26px;
+    }
+
+    .tools-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
+    }
+
+    .tool-card {
+        padding: 17px;
+    }
+}
+
+@media (max-width: 430px) {
+    .tools-grid {
+        grid-template-columns: 1fr;
+    }
+
+    nav a {
+        margin-left: 12px;
+        font-size: 13px;
+    }
+}
+</style>
+</head>
+
+<body>
+
+<!-- 顶部导航 -->
+
+<header>
+    <div class="logo">PhysicalSimulation</div>
+    <nav>
+        <a href="index.html">首页</a>
+        <a href="#tools">模拟</a>
+        <a href="#about">关于</a>
+    </nav>
+</header>
+
+<main class="container">
+
+    <!-- 欢迎区域 -->
+
+    <section class="hero">
+        <h1>物理模拟工具箱</h1>
+        <p>
+            用可交互的模拟观察运动、碰撞与物理规律，把公式变成看得见的过程。
+        </p>
+        <p class="credit">
+            鸣谢：DeepSeek Harness · DeepSeek · ChatGPT · GitHub
+        </p>
+
+        <div class="search-box">
+            <input
+                type="text"
+                id="search"
+                placeholder="搜索模拟名称或功能..."
+            >
+        </div>
+    </section>
+
+    <!-- 分类 -->
+
+    <div class="categories">
+        <button class="category active" data-category="全部">全部模拟</button>
+        <button class="category" data-category="力学">力学模拟</button>
+    </div>
+
+    <!-- 模拟列表 -->
+
+    <section id="tools">
+
+        <div class="section-title">
+            <h2>模拟列表</h2>
+            <span id="count">0 个模拟</span>
+        </div>
+
+        <div class="tools-grid" id="toolGrid"></div>
+
+        <div class="empty" id="empty">
+            没有找到相关模拟
+        </div>
+
+    </section>
+
+</main>
+
+<footer id="about">
+    <p>PHYSICAL SIMULATION</p>
+    <p style="margin-top:8px">
+        Designed for exploring physics.
+    </p>
+    <p style="margin-top:8px">
+        <a href="https://novacyclone.github.io/NovacyclonePersonalGateway/">关于我们</a>
+    </p>
+</footer>
+
+<script>
+
+// ==================================
+// 工具配置区：在这里添加或修改工具
+// ==================================
+
+const tools = [
+
+    {
+        name: "弹性正碰模拟",
+        icon: "💥",
+        category: "力学",
+        description: "一维弹性碰撞，调节两球的质量、初速度与位置，实时查看速度、动量、动能和碰撞次数。",
+        url: "tools/CollideBalls.html"
+    },
+
+    {
+        name: "二维弹性碰撞模拟",
+        icon: "🎱",
+        category: "力学",
+        description: "二维弹性碰撞，可调质量、速度与位置，实时查看轨迹与守恒量。碰到边缘反弹。",
+        url: "tools/CollideBalls2D.html"
+    }
+
+];
+
+// ==================================
+// 页面渲染
+// ==================================
+
+const grid = document.getElementById("toolGrid");
+const search = document.getElementById("search");
+const count = document.getElementById("count");
+const empty = document.getElementById("empty");
+
+let currentCategory = "全部";
+
+function renderTools() {
+
+    const keyword = search.value.trim().toLowerCase();
+
+    const filtered = tools.filter(tool => {
+
+        const matchCategory =
+            currentCategory === "全部" ||
+            tool.category === currentCategory;
+
+        const matchSearch =
+            tool.name.toLowerCase().includes(keyword) ||
+            tool.description.toLowerCase().includes(keyword) ||
+            tool.category.toLowerCase().includes(keyword);
+
+        return matchCategory && matchSearch;
+
+    });
+
+    grid.innerHTML = filtered.map(tool => `
+
+        <div class="tool-card">
+
+            <div class="tool-icon">${tool.icon}</div>
+
+            <h3>${tool.name}</h3>
+
+            <p>${tool.description}</p>
+
+            <a href="${tool.url}">
+                进入模拟 →
+            </a>
+
+        </div>
+
+    `).join("");
+
+    count.textContent = filtered.length + " 个模拟";
+
+    empty.style.display =
+        filtered.length === 0 ? "block" : "none";
+}
+
+// 搜索
+
+search.addEventListener("input", renderTools);
+
+// 分类切换
+document.querySelectorAll(".category").forEach(button => {
+    button.addEventListener("click", () => {
+        document.querySelector(".category.active")
+            .classList.remove("active");
+        button.classList.add("active");
+        currentCategory = button.dataset.category;
+        renderTools();
+    });
+});
+// 初始化
+renderTools();
+</script>
+</body>
+</html>
