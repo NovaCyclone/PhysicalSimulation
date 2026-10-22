@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>弹性正碰物理可视化模拟</title>
+<link rel="stylesheet" href="../documents/simulation2D.css">
+</head>
+<body>
+
+<div id="stage"><canvas id="sim"></canvas></div>
+
+<aside id="panel">
+  <div class="panel-head">
+    <h1>弹性正碰模拟</h1>
+    <a class="back-home" href="../index.html" title="返回物理模拟工具箱首页">← 返回首页</a>
+  </div>
+  <p class="sub">一维完全弹性碰撞：动量守恒 + 动能守恒<br>运行中位置、速度滑块实时跟随小球，也可直接拖动即时改变运动状态</p>
+  <p class="hint">💡 未运行时可用鼠标/手指拖动小球，松开后自动消除重叠；运行中「速度」「位置」滑块会实时刷新，拖动它们即可当场修改小球状态（质量需暂停后调整）。</p>
+
+  <section class="card">
+    <h2><span class="dot dot-a"></span>球 A</h2>
+    <div class="row"><label for="m1">质量 m₁</label><output id="om1">1.0 kg</output></div>
+    <input id="m1" type="range" min="0.2" max="10" step="0.1" value="1">
+    <div class="row"><label for="v1" id="lv1">初速度 v₁</label><output id="ov1">+2.50 m/s</output></div>
+    <input id="v1" type="range" min="-5" max="5" step="0.01" value="2.5">
+    <div class="row"><label for="x1" id="lx1">初始位置 x₁</label><output id="ox1">22%</output></div>
+    <input id="x1" type="range" min="0.02" max="0.98" step="0.005" value="0.22">
+  </section>
+
+  <section class="card">
+    <h2><span class="dot dot-b"></span>球 B</h2>
+    <div class="row"><label for="m2">质量 m₂</label><output id="om2">1.0 kg</output></div>
+    <input id="m2" type="range" min="0.2" max="10" step="0.1" value="1">
+    <div class="row"><label for="v2" id="lv2">初速度 v₂</label><output id="ov2">0.00 m/s</output></div>
+    <input id="v2" type="range" min="-5" max="5" step="0.01" value="0">
+    <div class="row"><label for="x2" id="lx2">初始位置 x₂</label><output id="ox2">78%</output></div>
+    <input id="x2" type="range" min="0.02" max="0.98" step="0.005" value="0.78">
+  </section>
+
+  <div class="buttons">
+    <button id="startBtn" class="primary">启动</button>
+    <button id="pauseBtn" disabled>暂停</button>
+  </div>
+
+  <p id="status" class="status">就绪：调整参数后点击「启动」</p>
+
+  <section class="card">
+    <h2>实时数据</h2>
+    <div class="kv"><span>A 速度</span><b id="rv1">—</b></div>
+    <div class="kv"><span>B 速度</span><b id="rv2">—</b></div>
+    <div class="kv"><span>A 位置</span><b id="rx1">—</b></div>
+    <div class="kv"><span>B 位置</span><b id="rx2">—</b></div>
+    <div class="kv"><span>碰撞次数</span><b id="rc">0</b></div>
+    <div class="kv"><span>总动量 p</span><b id="rp">—</b></div>
+    <div class="kv"><span>总动能 E</span><b id="re">—</b></div>
+  </section>
+</aside>
+
+<script>
+(function () {
+  'use strict';
+
+  const VSCALE = 80, FIXED_DT = 1 / 480, MAX_STEP = 240, GRAVITY_Y = 0.55;
+
+  const $ = id => document.getElementById(id);
+  const canvas = $('sim');
+  const ctx = canvas.getContext('2d');
+  const stage = $('stage');
+
+  const els = {
+    m1: $('m1'), v1: $('v1'), x1: $('x1'),
+    m2: $('m2'), v2: $('v2'), x2: $('x2'),
+    om1: $('om1'), ov1: $('ov1'), ox1: $('ox1'),
+    om2: $('om2'), ov2: $('ov2'), ox2: $('ox2'),
+    lv1: $('lv1'), lv2: $('lv2'), lx1: $('lx1'), lx2: $('lx2'),
+    start: $('startBtn'), pause: $('pauseBtn'), status: $('status'),
+    rv1: $('rv1'), rv2: $('rv2'), rx1: $('rx1'), rx2: $('rx2'),
+    rc: $('rc'), rp: $('rp'), re: $('re')
+  };
+
+  let W = 0, H = 0, DPR = 1;
+  let lastTime = performance.now();
+  let acc = 0, sliderClock = 0;
+
+  const state = {
+    running: false, started: false, balls: [],
+    collisions: 0, anyOut: false, flash: 0, contact: null
+  };
+  let runInitial = null;                  // 本次运行启动时的初值，结束时恢复
+
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  const radiusOf = m => 12 + 12 * Math.cbrt(m);
+  /* 面板中的速度统一保留两位小数（含实时速度与滑块数值） */
+  const fmtSpeed = v => {
+    const r = Math.round(v * 100) / 100;
+    const body = r === 0 ? '0.00' : (r > 0 ? '+' : '') + r.toFixed(2);
+    return body + ' m/s';
+  };
+  const setStatus = t => { els.status.textContent = t; };
+
+  function syncLabels() {
+    const live = state.running;
+    /* 运行中滑块代表“当前值”，未运行时代表“初值” */
+    els.lv1.textContent = live ? '速度 v₁' : '初速度 v₁';
+    els.lv2.textContent = live ? '速度 v₂' : '初速度 v₂';
+    els.lx1.textContent = live ? '位置 x₁' : '初始位置 x₁';
+    els.lx2.textContent = live ? '位置 x₂' : '初始位置 x₂';
+
+    const p1 = +els.x1.value, p2 = +els.x2.value;
+    els.om1.textContent = (+els.m1.value).toFixed(1) + ' kg';
+    els.ov1.textContent = fmtSpeed(+els.v1.value);
+    els.ox1.textContent = (live ? (p1 * 100).toFixed(1) : Math.round(p1 * 100)) + '%';
+    els.om2.textContent = (+els.m2.value).toFixed(1) + ' kg';
+    els.ov2.textContent = fmtSpeed(+els.v2.value);
+    els.ox2.textContent = (live ? (p2 * 100).toFixed(1) : Math.round(p2 * 100)) + '%';
+  }
+
+  /* 运行中仅锁定质量滑块；位置/速度滑块保持可交互，实时反映并可修改小球状态 */
+  function lockMassInputs(locked) {
+    [els.m1, els.m2].forEach(el => { el.disabled = locked; });
+  }
+
+  /* ==================== 滑块 ↔ 实时状态 双向同步 ==================== */
+  const editing = new WeakMap();          // 用户正在操作的滑块，暂不覆盖
+  function markEditing(el) { editing.set(el, true); }
+  function endEditing(el) { editing.delete(el); }
+  const isEditing = el => editing.get(el) === true;
+
+  function setSliderValue(el, v) {
+    const q = Math.round(v * 10000) / 10000;
+    if (Math.abs(+el.value - q) > 1e-4) el.value = q;
+  }
+
+  /* 把当前位置/速度实时写回滑块（force 时忽略“正在拖动”保护） */
+  function syncLiveControls(force) {
+    if (!state.balls.length || !W) return;
+    const a = state.balls[0], b = state.balls[1];
+    if (force || !isEditing(els.v1)) setSliderValue(els.v1, clamp(a.vx / VSCALE, +els.v1.min, +els.v1.max));
+    if (force || !isEditing(els.v2)) setSliderValue(els.v2, clamp(b.vx / VSCALE, +els.v2.min, +els.v2.max));
+    if (force || !isEditing(els.x1)) setSliderValue(els.x1, clamp(a.x / W, +els.x1.min, +els.x1.max));
+    if (force || !isEditing(els.x2)) setSliderValue(els.x2, clamp(b.x / W, +els.x2.min, +els.x2.max));
+    syncLabels();
+  }
+
+  /* 运行中拖动“位置”滑块：即时传送小球，并避免与另一球重叠 */
+  function setBallXLive(idx, frac) {
+    const b = state.balls[idx], o = state.balls[1 - idx];
+    const lo = b.r + 2, hi = Math.max(lo, W - b.r - 2);
+    let nx = clamp(frac * W, lo, hi);
+    const gap = b.r + o.r;
+    if (Math.abs(nx - o.x) < gap) {
+      nx = clamp(nx <= o.x ? o.x - gap : o.x + gap, lo, hi);
+    }
+    b.x = nx;
+  }
+
+  /* 运行中拖动滑块：即时写入对应小球的当前速度/位置 */
+  function applyLiveParam(el) {
+    if (!state.balls.length || !W) return;
+    const isV = (el === els.v1 || el === els.v2);
+    const isX = (el === els.x1 || el === els.x2);
+    if (!isV && !isX) return;
+    const idx = (el === els.v1 || el === els.x1) ? 0 : 1;
+    if (isV) state.balls[idx].vx = (+el.value) * VSCALE;
+    else setBallXLive(idx, +el.value);
+  }
+
+  /* ==================== 建立小球 ==================== */
+  function buildBalls() {
+    const m1 = +els.m1.value, m2 = +els.m2.value;
+    const v1 = +els.v1.value * VSCALE;
+    const v2 = +els.v2.value * VSCALE;
+    const r1 = radiusOf(m1), r2 = radiusOf(m2);
+    const y = H * GRAVITY_Y;
+
+    let x1 = clamp(W * (+els.x1.value), r1 + 2, W - r1 - 2);
+    let x2 = clamp(W * (+els.x2.value), r2 + 2, W - r2 - 2);
+
+    if (Math.abs(x2 - x1) < r1 + r2) {
+      const gap = r1 + r2;
+      if (x1 <= x2) {
+        x2 = x1 + gap;
+        if (x2 > W - r2 - 2) { x2 = W - r2 - 2; x1 = Math.max(r1 + 2, x2 - gap); }
+      } else {
+        x2 = x1 - gap;
+        if (x2 < r2 + 2) { x2 = r2 + 2; x1 = Math.min(W - r1 - 2, x2 + gap); }
+      }
+    }
+
+    state.balls = [
+      { label: 'A', m: m1, r: r1, x: x1, y, vx: v1, color: '#4ea8ff', light: '#b9dcff' },
+      { label: 'B', m: m2, r: r2, x: x2, y, vx: v2, color: '#ff7a59', light: '#ffc8b6' }
+    ];
+  }
+
+  function setup() {
+    state.collisions = 0; state.anyOut = false; state.flash = 0; state.contact = null;
+    buildBalls();
+    updateReadout();
+  }
+
+  /* ==================== 物理：完全弹性正碰 ==================== */
+  function physics(dt) {
+    const a = state.balls[0], b = state.balls[1];
+    a.x += a.vx * dt; b.x += b.vx * dt;
+
+    const dx = b.x - a.x, dist = Math.abs(dx), sumR = a.r + b.r;
+    if (dist >= sumR) return;
+
+    const n = dx >= 0 ? 1 : -1;
+    const vRel = (b.vx - a.vx) * n;
+    if (vRel >= 0) return;
+
+    const overlap = sumR - dist, mt = a.m + b.m;
+    a.x -= n * overlap * (b.m / mt);
+    b.x += n * overlap * (a.m / mt);
+
+    const m1 = a.m, m2 = b.m, u1 = a.vx, u2 = b.vx;
+    a.vx = ((m1 - m2) * u1 + 2 * m2 * u2) / mt;
+    b.vx = ((m2 - m1) * u2 + 2 * m1 * u1) / mt;
+
+    state.collisions++; state.flash = 1;
+    state.contact = { x: a.x + n * a.r, y: a.y };
+  }
+
+  const isOutside = b => (b.x + b.r < -4) || (b.x - b.r > W + 4);
+
+  function checkBounds() {
+    const balls = state.balls;
+    if (balls.some(isOutside)) state.anyOut = true;
+    if (!state.anyOut) return;
+    const stillActive = balls.some(b => !isOutside(b) && Math.abs(b.vx) > 2);
+    if (!stillActive) finish('小球已飞出屏幕，模拟结束 · 参数已恢复为本次初值，可重新启动');
+  }
+
+  function finish(msg) {
+    state.running = false; acc = 0;
+    lockMassInputs(false);
+    els.start.disabled = false; els.pause.disabled = true;
+    /* 结束后参数回到本次运行的初值，避免带着“已飞出屏幕”的位置/速度重新启动 */
+    if (runInitial) {
+      els.v1.value = runInitial.v1; els.v2.value = runInitial.v2;
+      els.x1.value = runInitial.x1; els.x2.value = runInitial.x2;
+      [els.v1, els.v2, els.x1, els.x2].forEach(endEditing);
+      syncLabels();
+    }
+    updateReadout();                      // 实时数据保留最终结果
+    setStatus(msg);
+  }
+
+  /* ==================== 渲染 ==================== */
+  function drawBall(b) {
+    const { x, y, r } = b;
+    ctx.save();
+    ctx.globalAlpha = 0.3; ctx.fillStyle = '#04060f';
+    ctx.beginPath();
+    ctx.ellipse(x, y + r * 0.95, r * 0.88, r * 0.22, 0, 0, Math.PI * 2);
+    ctx.fill(); ctx.restore();
+
+    const g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.4, r * 0.08, x, y, r * 1.05);
+    g.addColorStop(0, b.light); g.addColorStop(0.45, b.color); g.addColorStop(1, b.color);
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 1.5; ctx.stroke();
+
+    ctx.fillStyle = 'rgba(255,255,255,.95)';
+    ctx.font = `700 ${Math.max(12, r * 0.55)}px system-ui, sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(b.label, x, y);
+
+    ctx.fillStyle = 'rgba(210,225,255,.65)';
+    ctx.font = '600 11px system-ui, sans-serif'; ctx.textBaseline = 'top';
+    ctx.fillText(b.m.toFixed(1) + ' kg', x, y + r + 8);
+  }
+
+  function drawArrow(b) {
+    const spd = Math.abs(b.vx); if (spd < 4) return;
+    const dir = Math.sign(b.vx);
+    const len = 20 + Math.min(110, spd * 0.22);
+    const y = b.y - b.r - 18;
+    const x0 = b.x + dir * (b.r + 3), x1 = x0 + dir * len;
+    ctx.save();
+    ctx.strokeStyle = b.color; ctx.fillStyle = b.color;
+    ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+    ctx.shadowColor = b.color; ctx.shadowBlur = 10;
+    ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1 - dir * 9, y); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x1, y);
+    ctx.lineTo(x1 - dir * 11, y - 6.5);
+    ctx.lineTo(x1 - dir * 11, y + 6.5);
+    ctx.closePath(); ctx.fill(); ctx.restore();
+  }
+
+  function render() {
+    ctx.clearRect(0, 0, W, H);
+    if (!state.balls.length) return;
+    const y = state.balls[0].y;
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(120,150,220,.10)'; ctx.lineWidth = 1;
+    ctx.setLineDash([8, 14]);
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    ctx.restore();
+
+    for (const b of state.balls) drawArrow(b);
+    for (const b of state.balls) drawBall(b);
+
+    if (state.flash > 0.01 && state.contact) {
+      const t = 1 - state.flash;
+      ctx.save();
+      ctx.globalAlpha = state.flash * 0.85;
+      ctx.strokeStyle = '#ffe08a'; ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(state.contact.x, state.contact.y, 10 + t * 48, 0, Math.PI * 2);
+      ctx.stroke(); ctx.restore();
+    }
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(160,180,225,.55)';
+    ctx.font = '600 12px system-ui, sans-serif';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+    ctx.fillText('碰撞次数：' + state.collisions, 18, H - 16);
+    ctx.restore();
+  }
+
+  function updateReadout() {
+    if (!state.balls.length) {
+      els.rv1.textContent = '—'; els.rv2.textContent = '—';
+      els.rx1.textContent = '—'; els.rx2.textContent = '—';
+      els.rc.textContent = '0'; els.rp.textContent = '—'; els.re.textContent = '—';
+      return;
+    }
+    const a = state.balls[0], b = state.balls[1];
+    const va = a.vx / VSCALE, vb = b.vx / VSCALE;
+    els.rv1.textContent = fmtSpeed(va);
+    els.rv2.textContent = fmtSpeed(vb);
+    if (W) {
+      els.rx1.textContent = clamp(a.x / W * 100, 0, 100).toFixed(1) + '%';
+      els.rx2.textContent = clamp(b.x / W * 100, 0, 100).toFixed(1) + '%';
+    }
+    els.rc.textContent = String(state.collisions);
+    const p = a.m * va + b.m * vb;
+    const e = 0.5 * a.m * va * va + 0.5 * b.m * vb * vb;
+    els.rp.textContent = p.toFixed(2) + ' kg·m/s';
+    els.re.textContent = e.toFixed(2) + ' J';
+  }
+
+  /* ==================== 主循环 ==================== */
+  function frame(now) {
+    let dt = (now - lastTime) / 1000;
+    lastTime = now;
+    if (dt > 0.05) dt = 0.05;
+
+    if (state.running) {
+      acc += dt;
+      let steps = 0;
+      while (acc >= FIXED_DT && steps < MAX_STEP) {
+        physics(FIXED_DT); acc -= FIXED_DT; steps++;
+      }
+      if (acc > FIXED_DT * MAX_STEP) acc = 0;
+      checkBounds(); updateReadout();
+
+      /* 约 30Hz 把实时位置/速度回写到右侧滑块（checkBounds 可能已结束本次模拟） */
+      if (state.running) {
+        sliderClock += dt;
+        if (sliderClock >= 1 / 30) { sliderClock = 0; syncLiveControls(false); }
+      }
+    }
+    if (state.flash > 0) state.flash = Math.max(0, state.flash - dt * 3);
+    render();
+    requestAnimationFrame(frame);
+  }
+
+  /* ==================== 尺寸自适应 ==================== */
+  function resize() {
+    const rect = stage.getBoundingClientRect();
+    const newW = Math.max(1, Math.round(rect.width));
+    const newH = Math.max(1, Math.round(rect.height));
+    DPR = window.devicePixelRatio || 1;
+
+    canvas.width = Math.round(newW * DPR);
+    canvas.height = Math.round(newH * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+    const oldW = W; W = newW; H = newH;
+
+    if (state.started && state.balls.length) {
+      if (oldW > 1) { const k = W / oldW; state.balls.forEach(b => { b.x *= k; }); }
+      state.balls.forEach(b => { b.y = H * GRAVITY_Y; });
+    } else {
+      setup();
+    }
+    render();
+  }
+
+  /* ==================== 交互 ==================== */
+  function onParamChange(e) {
+    const el = e.target;
+    /* “正在编辑”只由真实指针/键盘操作标记（pointerdown/keydown），
+       避免程序化赋值后自动跟随被永久暂停 */
+    syncLabels();
+
+    /* 运行中：滑块直接修改小球的当前速度/位置，不打断模拟 */
+    if (state.running && state.started && state.balls.length) {
+      applyLiveParam(el);
+      updateReadout();
+      render();
+      return;
+    }
+
+    /* 未运行：以滑块值作为初值重建场景 */
+    state.started = false; state.running = false; acc = 0;
+    setup();
+    lockMassInputs(false);
+    els.start.disabled = false; els.pause.disabled = true;
+    setStatus('就绪：点击「启动」开始模拟');
+    render();
+  }
+
+  els.start.addEventListener('click', () => {
+    runInitial = { v1: els.v1.value, v2: els.v2.value, x1: els.x1.value, x2: els.x2.value };
+    setup(); acc = 0; sliderClock = 0; lastTime = performance.now();
+    state.started = true; state.running = true;
+    lockMassInputs(true);
+    els.start.disabled = true; els.pause.disabled = false;
+    syncLabels();
+    setStatus('运行中 · 位置/速度滑块实时跟随小球，可直接拖动修改；质量已锁定，暂停后可调');
+  });
+
+  els.pause.addEventListener('click', () => {
+    state.running = false; acc = 0;
+    syncLiveControls(true);                 // 暂停瞬间把当前状态定格到滑块
+    lockMassInputs(false);
+    els.start.disabled = false; els.pause.disabled = true;
+    setStatus('已暂停 · 滑块已同步为当前状态，可调整参数或拖动小球，再次「启动」从此状态继续');
+  });
+
+  ['m1', 'v1', 'x1', 'm2', 'v2', 'x2'].forEach(id => {
+    const el = els[id];
+    el.addEventListener('input', onParamChange);
+    el.addEventListener('pointerdown', () => markEditing(el));
+    el.addEventListener('keydown', () => markEditing(el));
+    el.addEventListener('keyup', () => endEditing(el));
+    el.addEventListener('change', () => endEditing(el));
+    el.addEventListener('blur', () => endEditing(el));
+  });
+
+  /* 松开鼠标/手指后恢复自动跟随（滑块可能离开指针范围，需要全局监听） */
+  ['pointerup', 'pointercancel'].forEach(evt => {
+    document.addEventListener(evt, () => {
+      [els.v1, els.v2, els.x1, els.x2].forEach(endEditing);
+    });
+  });
+
+  /* ==================== 拖动小球 ==================== */
+  let drag = null;
+
+  function pointerPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+  function hitBall(p) {
+    for (let i = state.balls.length - 1; i >= 0; i--) {
+      const b = state.balls[i];
+      if (Math.hypot(p.x - b.x, p.y - b.y) <= b.r + 6) return i;
+    }
+    return -1;
+  }
+
+  /* 松开时统一整理重叠：保持 A、B 当前左右关系推开 */
+  function resolveOverlapKeepOrder(a, b) {
+    const gap = a.r + b.r;
+    if (Math.abs(b.x - a.x) >= gap) return;
+
+    if (a.x <= b.x) {                     // B 在 A 右侧（或重合）
+      b.x = a.x + gap;
+      if (b.x > W - b.r - 2) { b.x = W - b.r - 2; a.x = Math.max(a.r + 2, b.x - gap); }
+    } else {                              // B 在 A 左侧
+      b.x = a.x - gap;
+      if (b.x < b.r + 2) { b.x = b.r + 2; a.x = Math.min(W - a.r - 2, b.x + gap); }
+    }
+  }
+
+  canvas.addEventListener('pointerdown', e => {
+    if (state.running || !state.balls.length) return;
+    const p = pointerPos(e);
+    const idx = hitBall(p);
+    if (idx < 0) return;
+    drag = { index: idx, offsetX: p.x - state.balls[idx].x };
+    canvas.setPointerCapture(e.pointerId);
+    canvas.style.cursor = 'grabbing';
+    e.preventDefault();
+  });
+
+  canvas.addEventListener('pointermove', e => {
+    if (state.running) { canvas.style.cursor = 'default'; return; }
+    const p = pointerPos(e);
+
+    if (!drag) {
+      canvas.style.cursor = hitBall(p) >= 0 ? 'grab' : 'default';
+      return;
+    }
+
+    /* 拖动时只更新被拖球位置 —— 不再实时触发重叠检测，允许短暂重叠 */
+    const b = state.balls[drag.index];
+    b.x = clamp(p.x - drag.offsetX, b.r + 2, W - b.r - 2);
+
+    /* 只同步被拖球自己的滑块 */
+    const sB = drag.index === 0 ? els.x1 : els.x2;
+    sB.value = clamp(b.x / W, +sB.min, +sB.max);
+
+    syncLabels();
+    render();
+  });
+
+  function endDrag(e) {
+    if (!drag) return;
+    const b = state.balls[drag.index];
+    b.x = clamp(b.x, b.r + 2, W - b.r - 2);
+
+    /* 松开时统一整理一次重叠（保持左右关系） */
+    resolveOverlapKeepOrder(state.balls[0], state.balls[1]);
+
+    /* 同步两个滑块到最终位置 */
+    const a0 = state.balls[0], b0 = state.balls[1];
+    els.x1.value = clamp(a0.x / W, +els.x1.min, +els.x1.max);
+    els.x2.value = clamp(b0.x / W, +els.x2.min, +els.x2.max);
+    syncLabels();
+
+    drag = null;
+    canvas.style.cursor = 'default';
+    if (e && e.pointerId !== undefined &&
+        canvas.hasPointerCapture && canvas.hasPointerCapture(e.pointerId)) {
+      canvas.releasePointerCapture(e.pointerId);
+    }
+
+    setStatus(state.started
+      ? '已暂停 · 位置已调整，再次「启动」从此状态继续'
+      : '就绪：点击「启动」开始模拟');
+    render();
+  }
+
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
+
+  /* ==================== 启动 ==================== */
+  syncLabels();
+  resize();
+  if (window.ResizeObserver) new ResizeObserver(resize).observe(stage);
+  else window.addEventListener('resize', resize);
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
